@@ -1,7 +1,6 @@
 import React from 'react';
 import ExpenseForm from './ExpenseForm';
 import ExpenseList from './ExpenseList';
-import CSVUpload from './CSVUpload';
 import Charts from './Charts';
 import CategoryManager from './CategoryManager';
 import MonthlyLimitForm from './MonthlyLimitForm';
@@ -89,16 +88,12 @@ function Dashboard({
 
             {activeTab === 'overview' && (
             <div className="space-y-6">
-                {/* Add Expense and CSV Upload */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Add Expense Form */}
+                <div className="grid grid-cols-1 lg:grid-cols-1 gap-6">
                 <ExpenseForm
                     userId={session.user.id}
                     categories={categories}
                     onExpenseAdded={handleExpenseAdded}
-                />
-                <CSVUpload
-                    userId={session.user.id}
-                    onUploadComplete={fetchExpenses}
                 />
                 </div>
 
