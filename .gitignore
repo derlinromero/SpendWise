@@ -13,6 +13,7 @@ backend/venv
 # Frontend (React)
 # ========================
 frontend/node_modules
+frontend/build
 
 # ========================
 # IDEs and Editors

@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { Trash2, Edit2, X, Save, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+import { Trash2, Edit2, X, Save, ChevronUp, ChevronDown, ChevronsUpDown, FileSpreadsheet } from 'lucide-react';
 import axios from 'axios';
-import { format, previousDay} from 'date-fns';
+import { format } from 'date-fns';
+import * as XLSX from 'xlsx';
 
 const API_URL = process.env.REACT_APP_API_URL;
 
@@ -27,6 +28,26 @@ function ExpenseList({ expenses, categories, onExpenseDeleted, onExpenseUpdated 
     key: null,
     direction: null
   });
+
+  // Export to Excel
+  const exportToExcel = () => {
+    if (!expenses || expenses.length === 0) {
+      alert('No expenses to export');
+      return;
+    }
+
+    const data = expenses.map(exp => ({
+      Date: exp.date,
+      Description: exp.title,
+      Category: exp.category,
+      Amount: parseFloat(exp.amount)
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Expenses');
+    XLSX.writeFile(wb, `expenses_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
 
   // Handle sorting
   const handleSort = (key) => {
@@ -203,8 +224,18 @@ function ExpenseList({ expenses, categories, onExpenseDeleted, onExpenseUpdated 
         Total Expenses ({expenses.length})
         </h2>
 
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-600">Show:</span>
+        <button
+          onClick={exportToExcel}
+          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+          title="Export to Excel"
+        >
+          <FileSpreadsheet className="w-4 h-4" />
+          Export Excel
+        </button>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-gray-600">Show:</span>
           <select
             value={itemsPerPage}
             onChange={(e) => handleItemsPerPageChange(parseInt(e.target.value))}
@@ -216,7 +247,6 @@ function ExpenseList({ expenses, categories, onExpenseDeleted, onExpenseUpdated 
             <option value={100}>100</option>
           </select>
           <span className="text-sm text-gray-600">per page</span>
-        </div>
       </div>
 
       <div className="overflow-x-auto">
