@@ -6,11 +6,21 @@ import {
   ReferenceLine
 } from 'recharts';
 import { TrendingUp } from 'lucide-react';
+import { format, subDays, subMonths } from 'date-fns';
 
 const API_URL = process.env.REACT_APP_API_URL;
 
 // Colors for charts
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+
+const TIME_RANGES = [
+  { label: '1w', value: '1w', getStartDate: () => subDays(new Date(), 7) },
+  { label: '1m', value: '1m', getStartDate: () => subMonths(new Date(), 1) },
+  { label: '3m', value: '3m', getStartDate: () => subMonths(new Date(), 3) },
+  { label: '6m', value: '6m', getStartDate: () => subMonths(new Date(), 6) },
+  { label: '1y', value: '1y', getStartDate: () => subMonths(new Date(), 12) },
+  { label: 'max', value: 'max', getStartDate: () => null },
+];
 
 /**
  * Charts Component - Visualize spending data
@@ -18,38 +28,58 @@ const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'
 function Charts({ userId, monthlyLimit }) {
   const [monthlyData, setMonthlyData] = useState([]);
   const [allTimeCategoryData, setAllTimeCategoryData] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingMonthly, setLoadingMonthly] = useState(true);
+  const [loadingCategory, setLoadingCategory] = useState(true);
+  const [monthlyTimeRange, setMonthlyTimeRange] = useState('max');
+  const [categoryTimeRange, setCategoryTimeRange] = useState('max');
 
   const [showModal, setShowModal] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(null);
   const [monthlyCategoryData, setMonthlyCategoryData] =useState([]);
   const [loadingMonthData, setLoadingMonthData] = useState(false);
 
-  useEffect(() => {
-    fetchAnalytics();
-  }, [userId]);
-
-  const fetchAnalytics = async () => {
-    try {
-      setLoading(true);
-      
-      // Fetch monthly trends
-      const monthlyResponse = await axios.get(
-        `${API_URL}/analytics/monthly/${userId}`
-      );
-      setMonthlyData(monthlyResponse.data.data);
-
-      // Fetch All time expenses per category
-      const allTimeCategoryDataResponse = await axios.get(
-        `${API_URL}/analytics/category-all/${userId}`
-      );
-      setAllTimeCategoryData(allTimeCategoryDataResponse.data.data);
-    } catch (error) {
-      console.error('Error fetching analytics:', error);
-    } finally {
-      setLoading(false);
-    }
+  const getStartDate = (range) => {
+    const r = TIME_RANGES.find(r => r.value === range);
+    return r?.getStartDate() || null;
   };
+
+  // Fetch monthly trends
+  useEffect(() => {
+    const fetchMonthly = async () => {
+      try {
+        setLoadingMonthly(true);
+        const startDate = getStartDate(monthlyTimeRange);
+        const response = await axios.get(
+          `${API_URL}/analytics/monthly/${userId}${startDate ? `?start_date=${startDate.toISOString().split('T')[0]}` : ''}`
+        );
+        setMonthlyData(response.data.data);
+      } catch (error) {
+        console.error('Error fetching monthly analytics:', error);
+      } finally {
+        setLoadingMonthly(false);
+      }
+    };
+    fetchMonthly();
+  }, [userId, monthlyTimeRange]);
+
+  // Fetch category data
+  useEffect(() => {
+    const fetchCategory = async () => {
+      try {
+        setLoadingCategory(true);
+        const startDate = getStartDate(categoryTimeRange);
+        const response = await axios.get(
+          `${API_URL}/analytics/category-all/${userId}${startDate ? `?start_date=${startDate.toISOString().split('T')[0]}` : ''}`
+        );
+        setAllTimeCategoryData(response.data.data);
+      } catch (error) {
+        console.error('Error fetching category analytics:', error);
+      } finally {
+        setLoadingCategory(false);
+      }
+    };
+    fetchCategory();
+  }, [userId, categoryTimeRange]);
 
   const handleMonthClick = async (data) => {
     if (!data || !data.month) return;
@@ -73,18 +103,10 @@ function Charts({ userId, monthlyLimit }) {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="bg-white/90 backdrop-blur-md rounded-xl shadow-xl border border-cyan-100 p-6 hover:shadow-2xl hover:scale-[1.01] transition-all durantion-300">
-        <p className="text-center text-gray-500">Loading analytics...</p>
-      </div>
-    );
-  }
-
   const hasMonthlyData = monthlyData && monthlyData.length > 0;
   const hasAllTimeCategoryData = allTimeCategoryData && allTimeCategoryData.length > 0;
   
-  if (!hasMonthlyData && !hasAllTimeCategoryData) {
+  if (!hasMonthlyData && !hasAllTimeCategoryData && !loadingMonthly && !loadingCategory) {
     return (
       <div className="bg-white/90 backdrop-blur-md rounded-xl shadow-xl border border-cyan-100 p-6 hover:shadow-2xl hover:scale-[1.01] transition-all durantion-300">
         <p className="text-center text-gray-500 py-8">
@@ -109,10 +131,32 @@ function Charts({ userId, monthlyLimit }) {
         {/* Monthly Trends */}
         {monthlyData.length > 0 && (
           <div className="bg-white/90 backdrop-blur-md rounded-xl shadow-xl border border-cyan-100 p-6 hover:shadow-2xl hover:scale-[1.01] transition-all durantion-300">
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-slate-800">
-              <TrendingUp className="w-5 h-5 text-cyan-600" />
-              Monthly Spending Trends
-            </h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold flex items-center gap-2 text-slate-800">
+                <TrendingUp className="w-5 h-5 text-cyan-600" />
+                Monthly Spending Trends
+              </h2>
+              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                {TIME_RANGES.map((range) => (
+                  <button
+                    key={range.value}
+                    onClick={() => setMonthlyTimeRange(range.value)}
+                    className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
+                      monthlyTimeRange === range.value
+                        ? 'bg-white text-cyan-600 shadow-sm'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    {range.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {loadingMonthly ? (
+              <div className="h-[300px] flex items-center justify-center">
+                <p className="text-gray-500">Loading...</p>
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={monthlyData}>
                 <CartesianGrid strokeDasharray="3 3" />
@@ -155,7 +199,7 @@ function Charts({ userId, monthlyLimit }) {
                 )}
               </LineChart>
             </ResponsiveContainer>
-
+            )}
             {/* Custom Legend for Monthly Limit*/}
             {monthlyLimit && (
               <div className="mt-4 flex items-center justify-center gap-6 text-sm">
@@ -177,7 +221,29 @@ function Charts({ userId, monthlyLimit }) {
         {/* All-Time Category Spending */}
         {allTimeCategoryData.length > 0 && (
           <div className="bg-white/90 backdrop-blur-md rounded-xl shadow-xl border border-cyan-100 p-6 hover:shadow-2xl hover:scale-[1.01] transition-all durantion-300">
-            <h2 className="text-xl font-bold mb-4">Money Spent by Category</h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold">Money Spent by Category</h2>
+              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                {TIME_RANGES.map((range) => (
+                  <button
+                    key={range.value}
+                    onClick={() => setCategoryTimeRange(range.value)}
+                    className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
+                      categoryTimeRange === range.value
+                        ? 'bg-white text-cyan-600 shadow-sm'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    {range.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {loadingCategory ? (
+              <div className="h-[300px] flex items-center justify-center">
+                <p className="text-gray-500">Loading...</p>
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={allTimeCategoryData}>
                 <CartesianGrid strokeDasharray="3 3" />
@@ -202,6 +268,7 @@ function Charts({ userId, monthlyLimit }) {
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
+            )}
           </div>
         )}
       </div>
