@@ -95,7 +95,7 @@ function Auth() {
       <div className="bg-white/95 backdrop-blur-xl p-8 rounded-2xl shadow-2xl border border-cyan-200 w-96">
         <h1 className="text-3xl font-bold flex items-center mb-2 bg-gradient-to-r from-cyan-600 to-blue-600 bg-clip-text text-transparent gap-2">
           <Sparkles className="w-6 h-6 text-cyan-400" />
-          Finance Dashboard
+          SpendWise
         </h1>
         <p className="text-center text-gray-600 mb-6">
           Expense Tracking

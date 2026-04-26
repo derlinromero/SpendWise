@@ -1,6 +1,6 @@
 {
-  "short_name": "Finance Dashboard",
-  "name": "Personal Finance Dashboard",
+  "short_name": "SpendWise",
+  "name": "SpendWise - Expense Tracker",
   "icons": [
     {
       "src": "favicon.ico",
