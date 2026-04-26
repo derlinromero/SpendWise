@@ -229,6 +229,100 @@ async def delete_category(category_id: str):
 # ==================== ANALYTICS ====================
 
 
+@app.get("/analytics/daily/{user_id}")
+async def get_daily_analytics(user_id: str, months: int = 6):
+    """Get daily spending grouped by day of month and month"""
+    try:
+        from datetime import timedelta
+
+        end_date = datetime.now().date()
+        start_date = end_date - timedelta(days=months * 30)
+
+        response = (
+            supabase.table("expenses")
+            .select("*")
+            .eq("user_id", user_id)
+            .gte("date", start_date.isoformat())
+            .execute()
+        )
+        expenses = response.data
+
+        if not expenses:
+            return {"success": True, "data": []}
+
+        df = pd.DataFrame(expenses)
+        df["date"] = pd.to_datetime(df["date"])
+        df["day"] = df["date"].dt.day
+        df["year_month"] = df["date"].dt.to_period("M").astype(str)
+
+        daily_data = (
+            df.groupby(["year_month", "day"]).agg({"amount": "sum"}).reset_index()
+        )
+        daily_data["amount"] = daily_data["amount"].astype(float)
+
+        return {"success": True, "data": daily_data.to_dict("records")}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/analytics/mom/{user_id}")
+async def get_mom_analytics(user_id: str, months: int = 12):
+    """Get month-over-month percentage change"""
+    try:
+        from datetime import timedelta
+
+        end_date = datetime.now().date()
+        start_date = end_date - timedelta(days=months * 30)
+
+        response = (
+            supabase.table("expenses")
+            .select("*")
+            .eq("user_id", user_id)
+            .gte("date", start_date.isoformat())
+            .execute()
+        )
+        expenses = response.data
+
+        if not expenses:
+            return {"success": True, "data": []}
+
+        df = pd.DataFrame(expenses)
+        df["date"] = pd.to_datetime(df["date"])
+        df["month"] = df["date"].dt.to_period("M").astype(str)
+
+        monthly_totals = df.groupby("month").agg({"amount": "sum"}).reset_index()
+        monthly_totals["amount"] = monthly_totals["amount"].astype(float)
+        monthly_totals = monthly_totals.sort_values("month")
+
+        mom_data = []
+        for i in range(len(monthly_totals)):
+            current = monthly_totals.iloc[i]
+            if i == 0:
+                pct_change = None
+            else:
+                previous = monthly_totals.iloc[i - 1]["amount"]
+                if previous > 0:
+                    pct_change = ((current["amount"] - previous) / previous) * 100
+                else:
+                    pct_change = None
+
+            mom_data.append(
+                {
+                    "month": current["month"],
+                    "amount": current["amount"],
+                    "pct_change": round(pct_change, 2)
+                    if pct_change is not None
+                    else None,
+                }
+            )
+
+        return {"success": True, "data": mom_data}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/analytics/monthly/{user_id}")
 async def get_monthly_analytics(user_id: str, start_date: str | None = None):
     """Get monthly spending analytics"""

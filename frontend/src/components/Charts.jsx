@@ -5,7 +5,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   ReferenceLine
 } from 'recharts';
-import { TrendingUp } from 'lucide-react';
+import { TrendingUp, TrendingDown, Calendar } from 'lucide-react';
 import { format, subDays, subMonths } from 'date-fns';
 
 const API_URL = process.env.REACT_APP_API_URL;
@@ -32,6 +32,12 @@ function Charts({ userId, monthlyLimit }) {
   const [loadingCategory, setLoadingCategory] = useState(true);
   const [monthlyTimeRange, setMonthlyTimeRange] = useState('max');
   const [categoryTimeRange, setCategoryTimeRange] = useState('max');
+
+  // New chart states
+  const [dailyData, setDailyData] = useState([]);
+  const [momData, setMomData] = useState([]);
+  const [loadingDaily, setLoadingDaily] = useState(true);
+  const [loadingMom, setLoadingMom] = useState(true);
 
   const [showModal, setShowModal] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(null);
@@ -81,6 +87,38 @@ function Charts({ userId, monthlyLimit }) {
     fetchCategory();
   }, [userId, categoryTimeRange]);
 
+  // Fetch daily heatmap data
+  useEffect(() => {
+    const fetchDaily = async () => {
+      try {
+        setLoadingDaily(true);
+        const response = await axios.get(`${API_URL}/analytics/daily/${userId}?months=6`);
+        setDailyData(response.data.data);
+      } catch (error) {
+        console.error('Error fetching daily analytics:', error);
+      } finally {
+        setLoadingDaily(false);
+      }
+    };
+    fetchDaily();
+  }, [userId]);
+
+  // Fetch month-over-month data
+  useEffect(() => {
+    const fetchMom = async () => {
+      try {
+        setLoadingMom(true);
+        const response = await axios.get(`${API_URL}/analytics/mom/${userId}?months=12`);
+        setMomData(response.data.data);
+      } catch (error) {
+        console.error('Error fetching MoM analytics:', error);
+      } finally {
+        setLoadingMom(false);
+      }
+    };
+    fetchMom();
+  }, [userId]);
+
   const handleMonthClick = async (data) => {
     if (!data || !data.month) return;
 
@@ -105,8 +143,10 @@ function Charts({ userId, monthlyLimit }) {
 
   const hasMonthlyData = monthlyData && monthlyData.length > 0;
   const hasAllTimeCategoryData = allTimeCategoryData && allTimeCategoryData.length > 0;
+  const hasDailyData = dailyData && dailyData.length > 0;
+  const hasMomData = momData && momData.length > 0;
   
-  if (!hasMonthlyData && !hasAllTimeCategoryData && !loadingMonthly && !loadingCategory) {
+  if (!hasMonthlyData && !hasAllTimeCategoryData && !hasDailyData && !hasMomData && !loadingMonthly && !loadingCategory && !loadingDaily && !loadingMom) {
     return (
       <div className="bg-white/90 backdrop-blur-md rounded-xl shadow-xl border border-cyan-100 p-6 hover:shadow-2xl hover:scale-[1.01] transition-all durantion-300">
         <p className="text-center text-gray-500 py-8">
@@ -271,6 +311,25 @@ function Charts({ userId, monthlyLimit }) {
             )}
           </div>
         )}
+
+        {/* Daily Spending Heatmap */}
+        {dailyData.length > 0 && (
+          <div className="bg-white/90 backdrop-blur-md rounded-xl shadow-xl border border-cyan-100 p-6 hover:shadow-2xl hover:scale-[1.01] transition-all durantion-300">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold flex items-center gap-2 text-slate-800">
+                <Calendar className="w-5 h-5 text-cyan-600" />
+                Daily Spending Pattern
+              </h2>
+            </div>
+            {loadingDaily ? (
+              <div className="h-[300px] flex items-center justify-center">
+                <p className="text-gray-500">Loading...</p>
+              </div>
+            ) : (
+              <HeatmapChart data={dailyData} />
+            )}
+          </div>
+        )}
       </div>
       {/* Mondal for Month Category Breakdown */}
       {showModal && (
@@ -345,6 +404,99 @@ function Charts({ userId, monthlyLimit }) {
         </div>
       )}
     </>
+  );
+}
+
+// Heatmap Chart Component
+function HeatmapChart({ data }) {
+  if (!data || data.length === 0) return null;
+
+  const months = [...new Set(data.map(d => d.year_month))].sort();
+  const days = [...new Set(data.map(d => d.day))].sort((a, b) => a - b);
+
+  const maxAmount = Math.max(...data.map(d => d.amount));
+
+  const getColor = (amount) => {
+    if (amount === 0 || amount === null) return '#e2e8f0';
+    const intensity = amount / maxAmount;
+    // Fewer, more distinct color steps
+    if (intensity < 0.2) return '#a5f3fc'; // Light cyan
+    if (intensity < 0.4) return '#22d3ee'; // Cyan
+    if (intensity < 0.6) return '#06b6d4'; // Darker cyan
+    if (intensity < 0.8) return '#0891b2'; // Even darker
+    return '#0e7490'; // Darkest cyan
+  };
+
+  const getTextColor = (amount) => {
+    if (amount === 0 || amount === null) return '#64748b';
+    const intensity = amount / maxAmount;
+    return intensity > 0.5 ? '#ffffff' : '#083344';
+  };
+
+  const getAmountForCell = (month, day) => {
+    const entry = data.find(d => d.year_month === month && d.day === day);
+    return entry ? entry.amount : 0;
+  };
+
+  return (
+    <div className="overflow-x-auto">
+      <div className="inline-block min-w-full">
+        <div className="flex">
+          {/* Day header row */}
+          <div className="w-12 flex-shrink-0"></div>
+          <div className="flex flex-1">
+            {days.map(day => (
+              <div key={day} className="flex-1 text-center text-xs text-gray-500 font-medium py-2">
+                {day}
+              </div>
+            ))}
+          </div>
+        </div>
+        {months.map(month => (
+          <div key={month} className="flex mb-1">
+            <div className="w-12 flex-shrink-0 text-xs text-gray-600 font-medium flex items-center">
+              {month}
+            </div>
+            <div className="flex flex-1 gap-0.5">
+              {days.map(day => {
+                const amount = getAmountForCell(month, day);
+                const textColor = getTextColor(amount);
+                return (
+                  <div
+                    key={day}
+                    className="flex-1 h-8 rounded-sm flex items-center justify-center text-xs font-medium cursor-pointer transition-transform hover:scale-110"
+                    style={{ backgroundColor: getColor(amount), color: textColor }}
+                    title={`${month}-${day.toString().padStart(2, '0')}: $${amount.toFixed(2)}`}
+                  >
+                    {amount > 0 ? `$${Math.round(amount)}` : ''}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+        <div className="mt-4 flex items-center justify-center gap-2">
+          <span className="text-xs text-gray-500">Less</span>
+          <div className="flex gap-0.5">
+            {[0, 0.2, 0.4, 0.6, 0.8, 1].map((intensity, i) => {
+              const r = Math.round(6 + (8 - 6) * intensity);
+              const g = Math.round(179 + (158 - 179) * intensity);
+              const b = Math.round(212 + (212 - 212) * intensity);
+              return (
+                <div
+                  key={i}
+                  className="w-4 h-4 rounded-sm"
+                  style={{
+                    backgroundColor: intensity === 0 ? '#e2e8f0' : `rgb(${r}, ${g}, ${b})`
+                  }}
+                />
+              );
+            })}
+          </div>
+          <span className="text-xs text-gray-500">More</span>
+        </div>
+      </div>
+    </div>
   );
 }
 
