@@ -36,7 +36,7 @@ function Dashboard({
                 <div>
                 <h1 className="text-2xl font-bold text-white flex items-center gap-2">
                     <Sparkles className="w-6 h-6 text-cyan-400" />
-                    Finance Dashboard
+                    SpendWise
                 </h1>
                 <p className="text-sm text-cyan-200 mt-1">
                     Welcome back, {session.user.user_metadata?.full_name || session.user.email?.split('@')[0]}

@@ -8,7 +8,7 @@ function SingleTabWarning() {
                 <div>
                     <strong>Multiple tabs detected.</strong>
                     <br />
-                    Please keep only one Finance Dashboard tab open to avoid data issues.
+                    Please keep only one SpendWise tab open to avoid data issues.
                 </div>
             </div>
         </div>

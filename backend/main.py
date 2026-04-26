@@ -6,7 +6,7 @@ import pandas as pd
 import io
 from datetime import datetime, date
 
-app = FastAPI(title="Finance Dashboard API")
+app = FastAPI(title="SpendWise API")
 
 # Enable CORS for frontend
 app.add_middleware(
@@ -22,7 +22,7 @@ supabase = get_supabase()
 
 @app.get("/")
 def read_root():
-    return {"message": "Finance Dashboard API", "status": "running"}
+    return {"message": "SpendWise API", "status": "running"}
 
 
 # ==================== EXPENSES ====================

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-const TAB_KEY = 'finance-dashboard-active-tab';
+const TAB_KEY = 'spendwise-active-tab';
 
 export function useSingleTabGuard(userId) {
     const [isDuplicateTab, setIsDuplicateTab] = useState(false);
