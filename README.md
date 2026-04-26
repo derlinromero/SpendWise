@@ -4,7 +4,7 @@ A full-stack expense tracking application built with React, FastAPI, and Supabas
 
 ## Live Demo
 
-https://spendwise.vercel.app/
+https://spendwise-zeta-five.vercel.app
 
 ## Features
 
