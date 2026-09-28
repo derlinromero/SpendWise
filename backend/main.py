@@ -1,44 +1,78 @@
-from fastapi import FastAPI, HTTPException, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import logging
+from datetime import date
+from typing import Annotated
+from uuid import UUID
+
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from models import ExpenseCreate, ExpenseUpdate, CategoryCreate, CategoryUpdate
-from database import get_supabase
-from datetime import datetime, date
+from fastapi.responses import JSONResponse
+from psycopg import AsyncConnection, DataError, Error, IntegrityError, OperationalError
+from psycopg.errors import UniqueViolation
+from psycopg_pool import PoolTimeout
 
-app = FastAPI(title="SpendWise API")
+from backend.auth import get_current_user
+from backend.database import get_connection, lifespan
+from backend.models import (
+    CategoryCreate,
+    CategoryRecord,
+    CategoryTotal,
+    CategoryUpdate,
+    DailyTotal,
+    Deleted,
+    ExpenseCreate,
+    ExpensePage,
+    ExpenseRecord,
+    ExpenseUpdate,
+    MonthChange,
+    MonthlyTotal,
+    Success,
+)
+from backend.repository import SpendWiseRepository
 
-# Enable CORS for frontend
+logger = logging.getLogger(__name__)
+app = FastAPI(title="SpendWise API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify your frontend URL
+    allow_origins=["*"],  # Keep development behavior; restrict before deployment.
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-supabase = get_supabase()
-security = HTTPBearer()
+
+def get_repository(
+    connection: Annotated[AsyncConnection, Depends(get_connection, scope="function")],
+    user_id: Annotated[str, Depends(get_current_user)],
+) -> SpendWiseRepository:
+    return SpendWiseRepository(connection, user_id)
 
 
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-) -> str:
-    """Verify JWT token with Supabase and return user_id"""
-    try:
-        response = supabase.auth.get_user(credentials.credentials)
-        if response.user is None:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid authentication credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        return response.user.id
-    except Exception as e:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+Repository = Annotated[SpendWiseRepository, Depends(get_repository)]
+
+
+@app.exception_handler(Error)
+@app.exception_handler(PoolTimeout)
+async def database_error_handler(request: Request, error: Exception) -> JSONResponse:
+    if isinstance(error, UniqueViolation):
+        status, message = 409, "A category with that name already exists."
+    elif isinstance(error, (DataError, IntegrityError)):
+        status, message = 400, "The supplied data could not be saved."
+    elif isinstance(error, (OperationalError, PoolTimeout)):
+        status, message = 503, "Database temporarily unavailable. Please try again."
+    else:
+        status, message = 500, "Unable to complete the database operation."
+    # SQL exceptions can include values/credentials: log their type only.
+    logger.warning("Database operation failed (%s)", type(error).__name__)
+    return JSONResponse(status_code=status, content={"detail": message})
+
+
+@app.exception_handler(Exception)
+async def unexpected_error_handler(request: Request, error: Exception) -> JSONResponse:
+    logger.error("Request failed (%s)", type(error).__name__)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Unable to complete the request. Please try again."},
+    )
 
 
 @app.get("/")
@@ -46,360 +80,92 @@ def read_root():
     return {"message": "SpendWise API", "status": "running"}
 
 
-# ==================== EXPENSES ====================
+@app.post("/expenses", response_model=Success[ExpenseRecord])
+async def create_expense(expense: ExpenseCreate, repository: Repository):
+    return {"success": True, "data": await repository.create_expense(expense)}
 
 
-@app.post("/expenses")
-async def create_expense(
-    expense: ExpenseCreate, user_id: str = Depends(get_current_user)
-):
-    """Create a new expense"""
-    try:
-        # Validate required fields
-        if not expense.title or not expense.title.strip():
-            raise HTTPException(status_code=400, detail="Title is required")
-
-        if expense.amount is None or expense.amount <= 0:
-            raise HTTPException(status_code=400, detail="Amount must be greater than 0")
-
-        final_category = expense.category if expense.category else "Uncategorized"
-
-        # Auto-create category if it doesn't exist
-        if final_category and final_category != "Uncategorized":
-            try:
-                # Checking if category exist
-                existing = (
-                    supabase.table("categories")
-                    .select("*")
-                    .eq("user_id", user_id)
-                    .eq("name", final_category)
-                    .execute()
-                )
-
-                # Create if doesn't exist
-                if not existing.data or len(existing.data) == 0:
-                    supabase.table("categories").insert(
-                        {"user_id": user_id, "name": final_category}
-                    ).execute()
-            except Exception as cat_error:
-                print(f"Note: Category creation skipped - {cat_error}")
-
-        # Convert date to string properly
-        if isinstance(expense.date, str):
-            date_str = expense.date
-        else:
-            date_str = expense.date.isoformat()
-
-        # Insert expense
-        data = {
-            "user_id": user_id,
-            "title": expense.title,
-            "amount": float(expense.amount),
-            "category": final_category,
-            "date": date_str,
-        }
-
-        response = supabase.table("expenses").insert(data).execute()
-
-        return {"success": True, "data": response.data[0]}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/expenses", response_model=ExpensePage)
+async def get_expenses(repository: Repository, page: int = 1, limit: int = 20):
+    return await repository.list_expenses(page, limit)
 
 
-@app.get("/expenses")
-async def get_expenses(
-    page: int = 1, limit: int = 20, user_id: str = Depends(get_current_user)
-):
-    """Get expenses for a user with pagination"""
-    try:
-        # Validate pagination params
-        if page < 1:
-            page = 1
-        if limit < 1 or limit > 100:
-            limit = 20
-
-        # Calculate offset (0-indexed)
-        offset = (page - 1) * limit
-
-        # Get total count for user
-        count_response = (
-            supabase.table("expenses")
-            .select("*", count="exact")
-            .eq("user_id", user_id)
-            .execute()
-        )
-        total = count_response.count if count_response.count else 0
-        total_pages = (total + limit - 1) // limit if total > 0 else 0
-
-        # Get paginated data using range
-        response = (
-            supabase.table("expenses")
-            .select("*")
-            .eq("user_id", user_id)
-            .order("date", desc=True)
-            .range(offset, offset + limit - 1)
-            .execute()
-        )
-
-        return {
-            "success": True,
-            "data": response.data,
-            "pagination": {
-                "total": total,
-                "page": page,
-                "limit": limit,
-                "total_pages": total_pages,
-            },
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.put("/expenses/{expense_id}")
+@app.put("/expenses/{expense_id}", response_model=Success[ExpenseRecord])
 async def update_expense(
-    expense_id: str, expense: ExpenseUpdate, user_id: str = Depends(get_current_user)
+    expense_id: UUID, expense: ExpenseUpdate, repository: Repository
 ):
-    """Update an expense"""
-    try:
-        # First verify the expense belongs to the user
-        expense_data = (
-            supabase.table("expenses").select("user_id").eq("id", expense_id).execute()
-        )
-        if not expense_data.data or expense_data.data[0]["user_id"] != user_id:
-            raise HTTPException(status_code=404, detail="Expense not found")
-
-        update_data = {k: v for k, v in expense.dict().items() if v is not None}
-
-        # Convert date to string if present
-        if "date" in update_data:
-            if isinstance(update_data["date"], str):
-                update_data["date"] = update_data["date"]
-            else:
-                update_data["date"] = update_data["date"].isoformat()
-
-        # Auto-create category if it doesn't exist and is being changed
-        if "category" in update_data and update_data["category"]:
-            try:
-                # Check if category exists
-                existing = (
-                    supabase.table("categories")
-                    .select("*")
-                    .eq("user_id", user_id)
-                    .eq("name", update_data["category"])
-                    .execute()
-                )
-
-                if not existing.data or len(existing.data) == 0:
-                    supabase.table("categories").insert(
-                        {"user_id": user_id, "name": update_data["category"]}
-                    ).execute()
-            except Exception as cat_error:
-                print(f"Note: Category creation skipped - {cat_error}")
-
-        response = (
-            supabase.table("expenses")
-            .update(update_data)
-            .eq("id", expense_id)
-            .execute()
-        )
-
-        return {"success": True, "data": response.data[0] if response.data else None}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "success": True,
+        "data": await repository.update_expense(expense_id, expense),
+    }
 
 
-@app.delete("/expenses/{expense_id}")
-async def delete_expense(expense_id: str, user_id: str = Depends(get_current_user)):
-    """Delete an expense"""
-    try:
-        # First verify the expense belongs to the user
-        expense_data = (
-            supabase.table("expenses").select("user_id").eq("id", expense_id).execute()
-        )
-        if not expense_data.data or expense_data.data[0]["user_id"] != user_id:
-            raise HTTPException(status_code=404, detail="Expense not found")
-
-        response = supabase.table("expenses").delete().eq("id", expense_id).execute()
-
-        return {"success": True}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.delete("/expenses/{expense_id}", response_model=Deleted)
+async def delete_expense(expense_id: UUID, repository: Repository):
+    await repository.delete_expense(expense_id)
+    return {"success": True}
 
 
-# ==================== CATEGORIES ====================
+@app.post("/categories", response_model=Success[CategoryRecord])
+async def create_category(category: CategoryCreate, repository: Repository):
+    return {"success": True, "data": await repository.create_category(category.name)}
 
 
-@app.post("/categories")
-async def create_category(
-    category: CategoryCreate, user_id: str = Depends(get_current_user)
-):
-    """Create a new category"""
-    try:
-        # Validate required fields
-        if not category.name or not category.name.strip():
-            raise HTTPException(status_code=400, detail="Category name is required")
-
-        data = {"user_id": user_id, "name": category.name.strip()}
-
-        response = supabase.table("categories").insert(data).execute()
-        return {"success": True, "data": response.data[0]}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/categories", response_model=Success[list[CategoryRecord]])
+async def get_categories(repository: Repository):
+    return {"success": True, "data": await repository.list_categories()}
 
 
-@app.get("/categories")
-async def get_categories(user_id: str = Depends(get_current_user)):
-    """Get all categories for a user"""
-    try:
-        response = (
-            supabase.table("categories")
-            .select("*")
-            .eq("user_id", user_id)
-            .order("name")
-            .execute()
-        )
-
-        return {"success": True, "data": response.data}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.put("/categories/{category_id}")
+@app.put("/categories/{category_id}", response_model=Success[CategoryRecord])
 async def update_category(
-    category_id: str, update: CategoryUpdate, user_id: str = Depends(get_current_user)
+    category_id: UUID, update: CategoryUpdate, repository: Repository
 ):
-    """Update a category name"""
-    try:
-        # First verify the category belongs to the user
-        cat_data = (
-            supabase.table("categories")
-            .select("user_id")
-            .eq("id", category_id)
-            .execute()
-        )
-        if not cat_data.data or cat_data.data[0]["user_id"] != user_id:
-            raise HTTPException(status_code=404, detail="Category not found")
-
-        response = (
-            supabase.table("categories")
-            .update({"name": update.name})
-            .eq("id", category_id)
-            .execute()
-        )
-
-        return {"success": True, "data": response.data[0] if response.data else None}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "success": True,
+        "data": await repository.update_category(category_id, update.name),
+    }
 
 
-@app.delete("/categories/{category_id}")
-async def delete_category(category_id: str):
-    """Delete a category"""
-    try:
-        response = supabase.table("categories").delete().eq("id", category_id).execute()
-
-        return {"success": True}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.delete("/categories/{category_id}", response_model=Deleted)
+async def delete_category(category_id: UUID, repository: Repository):
+    await repository.delete_category(category_id)
+    return {"success": True}
 
 
-# ==================== ANALYTICS ====================
-
-
-@app.get("/analytics/daily")
+@app.get("/analytics/daily", response_model=Success[list[DailyTotal]])
 async def get_daily_analytics(
-    months: int = 6, user_id: str = Depends(get_current_user)
+    repository: Repository, months: Annotated[int, Query(ge=1, le=1200)] = 6
 ):
-    """Get daily spending grouped by day of month and month via RPC"""
-    try:
-        response = supabase.rpc(
-            "get_daily_analytics", {"p_user_id": user_id, "p_months": months}
-        ).execute()
-        if response.data is None:
-            return {"success": True, "data": []}
-        return {"success": True, "data": response.data}
-    except Exception as e:
-        print(f"[ERROR] get_daily_analytics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return {"success": True, "data": await repository.analytics("daily", months)}
 
 
-@app.get("/analytics/mom")
-async def get_mom_analytics(months: int = 12, user_id: str = Depends(get_current_user)):
-    """Get month-over-month percentage change via RPC"""
-    try:
-        response = supabase.rpc(
-            "get_mom_analytics", {"p_user_id": user_id, "p_months": months}
-        ).execute()
-        return {"success": True, "data": response.data}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/analytics/monthly")
-async def get_monthly_analytics(
-    start_date: str | None = None, user_id: str = Depends(get_current_user)
+@app.get("/analytics/mom", response_model=Success[list[MonthChange]])
+async def get_mom_analytics(
+    repository: Repository, months: Annotated[int, Query(ge=1, le=1200)] = 12
 ):
-    """Get monthly spending analytics via RPC"""
-    try:
-        response = supabase.rpc(
-            "get_monthly_analytics", {"p_user_id": user_id, "p_start_date": start_date}
-        ).execute()
-        return {"success": True, "data": response.data}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {"success": True, "data": await repository.analytics("mom", months)}
 
 
-@app.get("/analytics/category")
+@app.get("/analytics/monthly", response_model=Success[list[MonthlyTotal]])
+async def get_monthly_analytics(repository: Repository, start_date: date | None = None):
+    return {"success": True, "data": await repository.analytics("monthly", start_date)}
+
+
+@app.get("/analytics/category", response_model=Success[list[CategoryTotal]])
 async def get_category_analytics(
-    month: str | None = None, user_id: str = Depends(get_current_user)
+    repository: Repository,
+    month: Annotated[str | None, Query(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")] = None,
 ):
-    """Get spending by category via RPC"""
-    try:
-        if month is None:
-            raise HTTPException(status_code=400, detail="Month parameter is required")
-
-        response = supabase.rpc(
-            "get_category_analytics", {"p_user_id": user_id, "p_month": month}
-        ).execute()
-        return {"success": True, "data": response.data}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    if month is None:
+        raise HTTPException(status_code=400, detail="Month parameter is required")
+    return {"success": True, "data": await repository.analytics("category", month)}
 
 
-@app.get("/analytics/category-all")
+@app.get("/analytics/category-all", response_model=Success[list[CategoryTotal]])
 async def get_all_time_category_analytics(
-    start_date: str | None = None, user_id: str = Depends(get_current_user)
+    repository: Repository, start_date: date | None = None
 ):
-    """Get spending by category for ALL time via RPC"""
-    try:
-        response = supabase.rpc(
-            "get_all_time_category_analytics",
-            {"p_user_id": user_id, "p_start_date": start_date},
-        ).execute()
-        if response.data is None:
-            return {"success": True, "data": []}
-        return {"success": True, "data": response.data}
-    except Exception as e:
-        print(f"[ERROR] get_all_time_category_analytics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ==================== CSV UPLOAD ====================
-# Deprecated logic removed.
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    return {
+        "success": True,
+        "data": await repository.analytics("category-all", start_date),
+    }

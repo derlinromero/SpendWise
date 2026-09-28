@@ -6,7 +6,7 @@
 # ========================
 # Backend (Python/FastAPI)
 # ========================
-backend/__pycache__
+__pycache__/
 backend/venv
 
 # ========================

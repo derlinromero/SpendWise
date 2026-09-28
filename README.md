@@ -1,6 +1,9 @@
 # SpendWise - Smart Expense Tracker
 
-A full-stack expense tracking application built with React, FastAPI, and Supabase.
+A full-stack expense tracking application built with React, FastAPI, and PostgreSQL.
+
+The backend uses Neon and Clerk. See [backend/.env.example](backend/.env.example)
+for the required environment variables and restricted database connection settings.
 
 ## Live Demo
 
@@ -25,7 +28,8 @@ https://spendwise-zeta-five.vercel.app
 
 - **Frontend**: React + Tailwind CSS + Recharts
 - **Backend**: FastAPI (Python)
-- **Database**: Supabase (PostgreSQL)
+- **Database**: Neon (PostgreSQL), accessed through Psycopg
+- **Authentication**: Clerk
 - **Deployment**: Vercel (Frontend) + Render (Backend)
 
 ## Project Structure
@@ -41,5 +45,7 @@ https://spendwise-zeta-five.vercel.app
 ├── backend/            # FastAPI backend
 │   ├── main.py        # API endpoints
 │   ├── models.py      # Pydantic models
-│   └── database.py   # Supabase connection
+│   ├── database.py   # PostgreSQL pool and per-user transactions
+│   ├── repository.py # Database queries
+│   └── auth.py       # Token verification
 ```
