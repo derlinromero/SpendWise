@@ -14,7 +14,9 @@ function Dashboard({
     categories,
     activeTab,
     monthlyLimit,
+    selectedMonth,
     setActiveTab,
+    setSelectedMonth,
     handleExpenseAdded,
     handleExpenseDeleted,
     handleExpenseUpdated,
@@ -107,6 +109,8 @@ function Dashboard({
                 <ExpenseList
                 expenses={expenses}
                 categories={categories}
+                selectedMonth={selectedMonth}
+                onSelectedMonthChange={setSelectedMonth}
                 onExpenseDeleted={handleExpenseDeleted}
                 onExpenseUpdated={handleExpenseUpdated}
                 />

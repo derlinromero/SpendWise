@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Trash2, Edit2, X, Save, ChevronUp, ChevronDown, ChevronsUpDown, FileSpreadsheet } from 'lucide-react';
 import axios from 'axios';
 import { format } from 'date-fns';
@@ -9,7 +9,14 @@ const API_URL = process.env.REACT_APP_API_URL;
 /**
  * ExpenseList Component - Display and manage expenses
  */
-function ExpenseList({ expenses, categories, onExpenseDeleted, onExpenseUpdated }) {
+function ExpenseList({
+  expenses,
+  categories,
+  selectedMonth,
+  onSelectedMonthChange,
+  onExpenseDeleted,
+  onExpenseUpdated,
+}) {
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({
     title: '',
@@ -21,7 +28,7 @@ function ExpenseList({ expenses, categories, onExpenseDeleted, onExpenseUpdated 
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage,  setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
 
   // Sorting state
   const [sortConfig, setSortConfig] = useState({
@@ -115,6 +122,10 @@ function ExpenseList({ expenses, categories, onExpenseDeleted, onExpenseUpdated 
       });
     }
 
+    if (itemsPerPage === 'all') {
+      return sortedExpenses;
+    }
+
     // Apply pagination
     const startIndex = (currentPage - 1) * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
@@ -122,7 +133,9 @@ function ExpenseList({ expenses, categories, onExpenseDeleted, onExpenseUpdated 
   }, [expenses, sortConfig, currentPage, itemsPerPage]);
 
   // Calculate total pages
-  const totalPages = Math.ceil(expenses.length / itemsPerPage);
+  const totalPages = itemsPerPage === 'all'
+    ? 1
+    : Math.ceil(expenses.length / itemsPerPage);
 
   // Handle page size change
   const handleItemsPerPageChange = (newSize) => {
@@ -206,27 +219,17 @@ function ExpenseList({ expenses, categories, onExpenseDeleted, onExpenseUpdated 
     }
   };
 
-  if (!expenses || expenses.length === 0) {
-    return (
-      <div className="bg-white/90 backdrop-blur-md rounded-xl shadow-xl border border-cyan-100 p-6 hover:shadow-2xl transition-all duration-300">
-        <h2 className="text-xl font-bold mb-4">Total Expenses</h2>
-        <p className="text-gray-500 text-center py-8">
-          No expenses yet. Add your first expense above!
-        </p>
-      </div>
-    );
-  }
-
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-bold mb-4">
-        Total Expenses ({expenses.length})
+      <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-center mb-4">
+        <h2 className="text-xl font-bold">
+          Total Expenses ({expenses.length})
         </h2>
 
         <button
           onClick={exportToExcel}
-          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+          disabled={expenses.length === 0}
+          className="flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           title="Export to Excel"
         >
           <FileSpreadsheet className="w-4 h-4" />
@@ -234,23 +237,49 @@ function ExpenseList({ expenses, categories, onExpenseDeleted, onExpenseUpdated 
         </button>
       </div>
 
-      <div className="flex items-center gap-2">
-        <span className="text-sm text-gray-600">Show:</span>
+      <div className="flex flex-col gap-4 mb-4 sm:flex-row sm:items-end sm:justify-between">
+        <label className="flex flex-col gap-1 text-sm text-gray-600">
+          Month
+          <input
+            type="month"
+            value={selectedMonth}
+            onChange={(event) => {
+              if (!event.target.value) return;
+              setCurrentPage(1);
+              onSelectedMonthChange(event.target.value);
+            }}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </label>
+
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-600">Show:</span>
           <select
             value={itemsPerPage}
-            onChange={(e) => handleItemsPerPageChange(parseInt(e.target.value))}
+            onChange={(event) => handleItemsPerPageChange(
+              event.target.value === 'all' ? 'all' : Number(event.target.value)
+            )}
             className="px-3 py-1 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value={10}>10</option>
             <option value={25}>25</option>
             <option value={50}>50</option>
             <option value={100}>100</option>
+            <option value="all">All</option>
           </select>
-          <span className="text-sm text-gray-600">per page</span>
+          <span className="text-sm text-gray-600">
+            {itemsPerPage === 'all' ? 'expenses' : 'per page'}
+          </span>
+        </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full">
+      {expenses.length === 0 ? (
+        <p className="text-gray-500 text-center py-8">
+          No expenses found for this month.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full">
           <thead>
             <tr className="border-b border-gray-200">
               <th
@@ -431,18 +460,20 @@ function ExpenseList({ expenses, categories, onExpenseDeleted, onExpenseUpdated 
               </tr>
             ))}
           </tbody>
-        </table>
-      </div>
+          </table>
+        </div>
+      )}
       
       {/* Pagination Controls */}
-      <div className="mt-4 flex justify-between items-center">
-        <div className="text-sm text-gray-600">
-          Showing {((currentPage - 1) * itemsPerPage) + 1} to{' '}
-          {Math.min(currentPage * itemsPerPage, expenses.length)} of{' '}
-          {expenses.length} expenses
-        </div>
+      {expenses.length > 0 && itemsPerPage !== 'all' && (
+        <div className="mt-4 flex justify-between items-center">
+          <div className="text-sm text-gray-600">
+            Showing {((currentPage - 1) * itemsPerPage) + 1} to{' '}
+            {Math.min(currentPage * itemsPerPage, expenses.length)} of{' '}
+            {expenses.length} expenses
+          </div>
 
-        <div className="flex gap-2">
+          <div className="flex gap-2">
           <button
             onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
             disabled={currentPage === 1}
@@ -494,8 +525,15 @@ function ExpenseList({ expenses, categories, onExpenseDeleted, onExpenseUpdated 
           >
             Next
           </button>
+          </div>
         </div>
-      </div>
+      )}
+
+      {expenses.length > 0 && itemsPerPage === 'all' && (
+        <div className="mt-4 text-sm text-gray-600">
+          Showing all {expenses.length} expenses
+        </div>
+      )}
       
       {/* Summary */}
       <div className="mt-4 pt-4 border-t border-gray-200">

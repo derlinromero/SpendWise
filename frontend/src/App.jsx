@@ -8,6 +8,12 @@ import ResetPassword from './components/ResetPassword';
 
 const API_URL = process.env.REACT_APP_API_URL;
 
+const getCurrentMonth = () => {
+  const today = new Date();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  return `${today.getFullYear()}-${month}`;
+};
+
 function App() {
   const { isLoaded: authLoaded, isSignedIn, getToken, signOut } = useAuth();
   const { isLoaded: userLoaded, user } = useUser();
@@ -15,6 +21,7 @@ function App() {
   const [categories, setCategories] = useState([]);
   const [activeTab, setActiveTab] = useState('overview');
   const [monthlyLimit, setMonthlyLimit] = useState(null);
+  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth);
   const navigate = useNavigate();
   const loading = !authLoaded || !userLoaded;
 
@@ -40,10 +47,13 @@ function App() {
     }
     configureApi().catch((error) => console.error('Authentication setup failed:', error));
     return () => { cancelled = true; };
-  }, [getToken, isSignedIn, user?.id]);
+  }, [getToken, isSignedIn, selectedMonth, user?.id]);
 
   const fetchExpenses = async () => {
-    const response = await axios.get(`${API_URL}/expenses`);
+    const [year, month] = selectedMonth.split('-').map(Number);
+    const response = await axios.get(`${API_URL}/expenses`, {
+      params: { year, month, all: true },
+    });
     setExpenses(response.data.data);
   };
 
@@ -67,7 +77,9 @@ function App() {
   };
 
   const handleExpenseAdded = (expense) => {
-    setExpenses((current) => [expense, ...current]);
+    if (expense.date.slice(0, 7) === selectedMonth) {
+      setExpenses((current) => [expense, ...current]);
+    }
     fetchCategories();
   };
 
@@ -76,9 +88,14 @@ function App() {
   };
 
   const handleExpenseUpdated = (updatedExpense) => {
-    setExpenses((current) => current.map((expense) => (
-      expense.id === updatedExpense.id ? updatedExpense : expense
-    )));
+    setExpenses((current) => {
+      if (updatedExpense.date.slice(0, 7) !== selectedMonth) {
+        return current.filter((expense) => expense.id !== updatedExpense.id);
+      }
+      return current.map((expense) => (
+        expense.id === updatedExpense.id ? updatedExpense : expense
+      ));
+    });
     fetchCategories();
   };
 
@@ -102,7 +119,9 @@ function App() {
           categories={categories}
           activeTab={activeTab}
           monthlyLimit={monthlyLimit}
+          selectedMonth={selectedMonth}
           setActiveTab={setActiveTab}
+          setSelectedMonth={setSelectedMonth}
           handleExpenseAdded={handleExpenseAdded}
           handleExpenseDeleted={handleExpenseDeleted}
           handleExpenseUpdated={handleExpenseUpdated}
