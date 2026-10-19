@@ -86,8 +86,37 @@ async def create_expense(expense: ExpenseCreate, repository: Repository):
 
 
 @app.get("/expenses", response_model=ExpensePage)
-async def get_expenses(repository: Repository, page: int = 1, limit: int = 20):
-    return await repository.list_expenses(page, limit)
+async def get_expenses(
+    repository: Repository,
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    year: Annotated[int | None, Query(ge=1, le=9998)] = None,
+    month: Annotated[int | None, Query(ge=1, le=12)] = None,
+    show_all: Annotated[bool, Query(alias="all")] = False,
+):
+    if (year is None) != (month is None):
+        raise HTTPException(
+            status_code=422,
+            detail="Year and month must be provided together.",
+        )
+
+    start_date = (
+        date(year, month, 1) if year is not None and month is not None else None
+    )
+    if start_date is None:
+        end_date = None
+    elif month == 12:
+        end_date = date(year + 1, 1, 1)
+    else:
+        end_date = date(year, month + 1, 1)
+
+    return await repository.list_expenses(
+        page,
+        limit,
+        start_date=start_date,
+        end_date=end_date,
+        show_all=show_all,
+    )
 
 
 @app.put("/expenses/{expense_id}", response_model=Success[ExpenseRecord])

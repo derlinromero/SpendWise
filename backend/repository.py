@@ -52,29 +52,52 @@ class SpendWiseRepository:
         )
         return await cursor.fetchone()
 
-    async def list_expenses(self, page: int, limit: int) -> dict:
-        page = max(page, 1)
-        limit = limit if 1 <= limit <= 100 else 20
+    async def list_expenses(
+        self,
+        page: int,
+        limit: int,
+        start_date: date | None = None,
+        end_date: date | None = None,
+        show_all: bool = False,
+    ) -> dict:
+        date_filter = ""
+        query_parameters: tuple = (self.user_id,)
+        if start_date is not None and end_date is not None:
+            date_filter = " AND date >= %s AND date < %s"
+            query_parameters += (start_date, end_date)
+
         cursor = await self.connection.execute(
-            "SELECT count(*) AS total FROM public.expenses WHERE user_id = %s",
-            (self.user_id,),
+            "SELECT count(*) AS total FROM public.expenses "
+            f"WHERE user_id = %s{date_filter}",
+            query_parameters,
         )
         total = (await cursor.fetchone())["total"]
-        cursor = await self.connection.execute(
-            """
-            SELECT * FROM public.expenses WHERE user_id = %s
-            ORDER BY date DESC, id DESC LIMIT %s OFFSET %s
-            """,
-            (self.user_id, limit, (page - 1) * limit),
-        )
+
+        expenses_query = f"""
+            SELECT * FROM public.expenses
+            WHERE user_id = %s{date_filter}
+            ORDER BY date DESC, id DESC
+        """
+        if show_all:
+            cursor = await self.connection.execute(expenses_query, query_parameters)
+            response_limit = total
+            total_pages = 1 if total else 0
+        else:
+            cursor = await self.connection.execute(
+                f"{expenses_query} LIMIT %s OFFSET %s",
+                query_parameters + (limit, (page - 1) * limit),
+            )
+            response_limit = limit
+            total_pages = (total + limit - 1) // limit
+
         return {
             "success": True,
             "data": await cursor.fetchall(),
             "pagination": {
                 "total": total,
                 "page": page,
-                "limit": limit,
-                "total_pages": (total + limit - 1) // limit,
+                "limit": response_limit,
+                "total_pages": total_pages,
             },
         }
 
